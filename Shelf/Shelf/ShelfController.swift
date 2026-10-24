@@ -37,14 +37,16 @@ final class ShelfController {
 
     var isVisible: Bool { panel?.isVisible ?? false }
 
-    /// Shows the shelf centered on `point` (global, bottom-left origin), kept inside that screen. A shelf
-    /// already on screen comes over to `point` unless it is under it. The app is not activated (F4).
+    /// Shows the shelf with its hide button on `point` (global, bottom-left origin), kept inside that
+    /// screen, so the shelf itself lies beside the cursor. A shelf already on screen comes over to
+    /// `point` unless it is under it. The app is not activated (F4).
     func show(near point: CGPoint) {
         let panel = panel ?? makePanel()
         if panel.isVisible, NSMouseInRect(point, panel.frame, false) { return }
         let screen = NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) } ?? NSScreen.main
         let visibleFrame = screen?.visibleFrame ?? CGRect(origin: .zero, size: Self.size)
-        panel.setFrame(Self.frame(for: Self.size, centeredAt: point, in: visibleFrame), display: true)
+        let frame = Self.frame(for: Self.size, putting: ShelfViewController.hideButtonCenter, at: point, in: visibleFrame)
+        panel.setFrame(frame, display: true)
         if !panel.isVisible {
             panel.orderFrontRegardless()
             onChange?()
@@ -114,9 +116,10 @@ final class ShelfController {
         return panel
     }
 
-    /// A frame of `size` centered at `point`, shifted as little as needed to fit in `bounds`.
-    nonisolated static func frame(for size: CGSize, centeredAt point: CGPoint, in bounds: CGRect) -> CGRect {
-        var origin = CGPoint(x: point.x - size.width / 2, y: point.y - size.height / 2)
+    /// A frame of `size` with `anchor` (measured from its top-left corner) at `point`, shifted as little
+    /// as needed to fit in `bounds`.
+    nonisolated static func frame(for size: CGSize, putting anchor: CGPoint, at point: CGPoint, in bounds: CGRect) -> CGRect {
+        var origin = CGPoint(x: point.x - anchor.x, y: point.y - (size.height - anchor.y))
         origin.x = min(max(origin.x, bounds.minX), bounds.maxX - size.width)
         origin.y = min(max(origin.y, bounds.minY), bounds.maxY - size.height)
         return CGRect(origin: origin, size: size)

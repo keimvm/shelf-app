@@ -5,10 +5,13 @@ import Testing
 struct ShelfPlacementTests {
     private let size = CGSize(width: 260, height: 200)
     private let screen = CGRect(x: 0, y: 0, width: 1800, height: 1144)
+    private let anchor = ShelfViewController.hideButtonCenter
 
-    @Test func centeredOnCursorWhenItFits() {
-        let frame = ShelfController.frame(for: size, centeredAt: CGPoint(x: 900, y: 500), in: screen)
-        #expect(frame == CGRect(x: 770, y: 400, width: 260, height: 200))
+    @Test func hideButtonOnCursorWhenItFits() {
+        let cursor = CGPoint(x: 900, y: 500)
+        let frame = ShelfController.frame(for: size, putting: anchor, at: cursor, in: screen)
+        #expect(frame == CGRect(x: 900 - anchor.x, y: 500 - (200 - anchor.y), width: 260, height: 200))
+        #expect(CGPoint(x: frame.minX + anchor.x, y: frame.maxY - anchor.y) == cursor)
     }
 
     @Test(arguments: [
@@ -18,7 +21,7 @@ struct ShelfPlacementTests {
         CGPoint(x: 1795, y: 5),
     ])
     func keptInsideScreenNearEdges(cursor: CGPoint) {
-        let frame = ShelfController.frame(for: size, centeredAt: cursor, in: screen)
+        let frame = ShelfController.frame(for: size, putting: anchor, at: cursor, in: screen)
         #expect(screen.contains(frame))
         #expect(frame.size == size)
     }
@@ -26,7 +29,7 @@ struct ShelfPlacementTests {
     @Test func respectsScreenOrigin() {
         // A second display to the left of the main one, below the menu bar.
         let secondary = CGRect(x: -1440, y: 0, width: 1440, height: 875)
-        let frame = ShelfController.frame(for: size, centeredAt: CGPoint(x: -1430, y: 870), in: secondary)
+        let frame = ShelfController.frame(for: size, putting: anchor, at: CGPoint(x: -1430, y: 870), in: secondary)
         #expect(frame.origin == CGPoint(x: -1440, y: 675))
     }
 }
