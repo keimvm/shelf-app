@@ -304,3 +304,36 @@
 - `CaptureSpike.app`、検証用の `Shelf.app`（`dev.keimvm.Shelf.verify`）、テストのホストとして登録された Debug の `Shelf.app` を LaunchServices から登録を外し、`pbs -update` した。Debug のサービスが残っていると、`NSPerformService` が Debug 版（インストール済みの Shelf と同じコンテナ）を起動するおそれがあったため、呼ぶ前に外した。
 - `~/Library/Containers/dev.keimvm.Shelf.verify` は中身を消したが、macOS が保護するメタデータ（`.com.apple.containermanagerd.metadata.plist`）とそのフォルダは消せずに残っている。
 - インストール済みの Shelf 0.1 は起動したまま触れていない（終了・入れ替えはしていない）。
+
+## 7. サービスのショートカットをアプリから変える（2026-10-24）
+
+「Shelf に置く」（0.2 の F13）のショートカットを、表示のショートカット（F12）と同じようにアプリのメニューで記録して変えられるかを確かめた。§4 では「Sandbox のアプリからは変更できない」を推測としていた。結果を受けて、サービスは機能ごと削除した（PRD §9.1）。
+
+### 7.1 方法
+
+- コード：[spikes/service-shortcut](../spikes/service-shortcut/README.md)。使い捨て。
+  - `PrefsSpike`：Sandbox 有効（Entitlements は N2 の 3 つ）、`LSUIElement`。ユーザーが変えたサービスのショートカットを保持する `pbs` ドメインを `CFPreferences` で読み、無害なキーを書いて同期し、消す。`NSServicesStatus` には書かない（ユーザーの設定を変えないため）。
+- 環境：macOS 27.0.1（26A434）。
+
+### 7.2 結果
+
+**事実**
+- `pbs` ドメインは読めた。`NSServicesStatus` は辞書として返り、キーの一覧（`NSServicesStatus`・`FinderActive`・`FinderOrdering`・`ServicesShortcutsPresent`）は Sandbox の外から `defaults read pbs` で見たものと一致した。
+- 書き込みは届かなかった。`CFPreferencesAppSynchronize` は `false` を返し、同じプロセス内では書いた値を読み返せたが、`defaults read pbs PrefsSpikeProbe` には見つからなかった。コンテナの `Library/Preferences` にも `pbs` のファイルはできなかった。
+- `x-apple.systempreferences:com.apple.Keyboard-Settings.extension`（`?Shortcuts` 付きも）を開くアプリはシステム設定だった。
+- この Mac では「Shelf に置く」のショートカットは変えられておらず、`NSServicesStatus` に Shelf の項目はなかった。
+
+**推測**
+- Sandbox のアプリがサービスのショートカットを変えるには、`pbs` への書き込みの例外（`temporary-exception.shared-preference.read-write`）が要る。N2 に反するので使わない。
+- `RegisterEventHotKey` で別のショートカットを登録しても、押したときに前面のアプリの選択を受け取る手段がない（Apple Events やキー入力の合成には権限が要り、N3 に反する）。
+- そのため、アプリでできるのは変更の場所（システム設定 → キーボード）を開くことまで。一度その形で実装したが、アプリで設定できないショートカットは残さないことにして、サービスごと削除した。
+
+**未確認（残り）**
+- `?Shortcuts` を付けた URL でキーボードショートカットのシートまで開くか。
+- ユーザーが変えたショートカットが `NSServicesStatus` にどんな形で入るか（変えた状態で確かめていない）。
+
+### 7.3 検証環境への影響
+
+- `pbs` に書いたキーは同期されず、残っていない（`defaults read` で確認）。
+- `PrefsSpike.app` と、テストと画面確認のためにビルドした Debug の `Shelf.app`（検証用 Bundle ID のものを含む）を LaunchServices から登録を外し、`pbs -update` した。その時点でサービスの提供元は `/Applications/Shelf.app` だけだった。サービスを削除した Release ビルドを `scripts/install.sh` で入れて起動し、`pbs -update` すると、`pbs -dump` に `putOnShelf` は残っていなかった（登録は外れた）。
+- インストール済みの Shelf は起動したまま触れていない。

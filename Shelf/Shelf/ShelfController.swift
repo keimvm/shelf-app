@@ -1,7 +1,6 @@
 import AppKit
-import os
 
-/// The one shelf: shows, hides, and moves its panel, and takes items off it (F4, F6, F7, F14).
+/// The one shelf: shows, hides, and moves its panel, and takes items off it or empties it (F4, F6, F7, F14).
 ///
 /// Hiding the shelf keeps its items; only taking them out or removing them does away with them.
 @MainActor
@@ -17,7 +16,6 @@ final class ShelfController {
     var onChange: (() -> Void)?
 
     private let storage: TemporaryStorage
-    private let log = Logger(subsystem: "dev.keimvm.Shelf", category: "shelf")
     private var panel: ShelfPanel?
     private var viewController: ShelfViewController?
     /// The shelf was emptied while promised files were still arriving; hide it if they leave it empty.
@@ -61,17 +59,6 @@ final class ShelfController {
 
     func toggle(near point: CGPoint) {
         isVisible ? hide() : show(near: point)
-    }
-
-    /// Puts what `pasteboard` holds on the shelf, showing it near `point` if it is hidden (F13). Returns
-    /// whether anything was accepted.
-    func put(from pasteboard: NSPasteboard, near point: CGPoint) -> Bool {
-        reader.read(pasteboard) { [weak self] items in
-            guard let self else { return }
-            log.info("Put \(items.count) item(s): \(items.map(\.kindDescription).joined(separator: ","), privacy: .public)")
-            shelf.append(items)
-            if !isVisible { show(near: point) }
-        }
     }
 
     /// Takes the items at `urls` off the shelf and hides it once it is empty (F7). Their generated files
@@ -120,6 +107,7 @@ final class ShelfController {
         controller.onHide = { [weak self] in self?.hide() }
         controller.onTakeOut = { [weak self] urls in self?.remove(urls, keepingFilesFor: Self.temporaryFilesGrace) }
         controller.onRemove = { [weak self] urls in self?.remove(urls, keepingFilesFor: 0) }
+        controller.onClear = { [weak self] in self?.clear() }
         panel.contentViewController = controller
         self.panel = panel
         viewController = controller

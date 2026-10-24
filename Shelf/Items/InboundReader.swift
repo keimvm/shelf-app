@@ -1,7 +1,7 @@
 import AppKit
 import os
 
-/// Turns a pasteboard from a drop or the service into shelf items (F5, F8, F13).
+/// Turns the pasteboard of a drop into shelf items (F5, F8).
 ///
 /// One kind is taken at a time, in this order: file URLs, file promises, web URLs, text. Files are
 /// kept by reference; the other kinds become files in `storage` (promised files as delivered, text as
@@ -34,7 +34,7 @@ final class InboundReader {
     nonisolated private static let log = Logger(subsystem: "dev.keimvm.Shelf", category: "inbound")
 
     /// Reads `pasteboard` and reports the items through `completion` on the main actor.
-    /// Call this while handling the drop or service: promises are requested before returning. Files,
+    /// Call this while handling the drop: promises are requested before returning. Files,
     /// URLs, and text are reported once, before returning; each promised file is reported when it arrives.
     /// Returns `false` when the pasteboard has nothing this app accepts.
     func read(_ pasteboard: NSPasteboard, completion: @escaping @MainActor @Sendable ([ShelfItem]) -> Void) -> Bool {

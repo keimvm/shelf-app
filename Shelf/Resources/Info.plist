@@ -24,35 +24,5 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
-	<key>NSServices</key>
-	<array>
-		<dict>
-			<key>NSMenuItem</key>
-			<dict>
-				<key>default</key>
-				<string>Shelf に置く</string>
-			</dict>
-			<key>NSMessage</key>
-			<string>putOnShelf</string>
-			<key>NSPortName</key>
-			<string>Shelf</string>
-			<key>NSSendFileTypes</key>
-			<array>
-				<string>public.item</string>
-			</array>
-			<key>NSSendTypes</key>
-			<array>
-				<string>public.url</string>
-				<string>public.utf8-plain-text</string>
-			</array>
-			<key>NSRequiredContext</key>
-			<dict/>
-			<key>NSKeyEquivalent</key>
-			<dict>
-				<key>default</key>
-				<string>^~@p</string>
-			</dict>
-		</dict>
-	</array>
 </dict>
 </plist>

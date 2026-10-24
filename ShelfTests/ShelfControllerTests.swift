@@ -53,12 +53,14 @@ final class ShelfControllerTests {
         storage.removeAll()
     }
 
-    /// Puts `text` on the shelf as the service would, and returns the generated file.
+    /// Shows the shelf and puts `text` on it as a drop would, and returns the generated file.
     private func putText(_ text: String) throws -> URL {
         let pasteboard = NSPasteboard(name: pasteboardName)
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        #expect(controller.put(from: pasteboard, near: point))
+        controller.show(near: point)
+        let accepted = controller.reader.read(pasteboard) { [controller] items in controller.shelf.append(items) }
+        #expect(accepted)
         return try #require(controller.shelf.items.last?.url)
     }
 
@@ -85,12 +87,6 @@ final class ShelfControllerTests {
         #expect(controller.isVisible)
         controller.hide()
         #expect(controller.shelf.items.map(\.name) == ["keep me.txt"])
-    }
-
-    @Test func putShowsAHiddenShelfWithTheItems() throws {
-        let url = try putText("hello")
-        #expect(controller.isVisible)
-        #expect(controller.shelf.items == [.generated(url, .text)])
     }
 
     @Test func takingOutTheLastItemHidesTheShelf() throws {
@@ -126,13 +122,6 @@ final class ShelfControllerTests {
         #expect(!controller.isVisible)
         #expect(!FileManager.default.fileExists(atPath: generated.path))
         #expect(FileManager.default.fileExists(atPath: original.path))
-    }
-
-    @Test func emptyPasteboardIsRefused() {
-        let pasteboard = NSPasteboard(name: pasteboardName)
-        pasteboard.clearContents()
-        #expect(!controller.put(from: pasteboard, near: point))
-        #expect(!controller.isVisible)
     }
 
     @Test func onChangeReportsItemsAndVisibility() throws {

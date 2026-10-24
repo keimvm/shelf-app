@@ -24,7 +24,7 @@ final class ShelfDragSource: NSObject, NSDraggingSource {
 
 /// A view that can start a drag out of the shelf.
 ///
-/// Clicks on its subviews go to it. It takes the first click while another app is active
+/// Clicks on its subviews go to it, except on `passThroughView`. It takes the first click while another app is active
 /// (verification.md K2), and starts a drag only from a press it received itself: during an external
 /// drag a stray `mouseDragged` can arrive without one (verification.md K3).
 final class ShelfDragOriginView: NSView {
@@ -32,11 +32,17 @@ final class ShelfDragOriginView: NSView {
     var onDragOut: ((NSEvent) -> Void)?
     /// Makes the menu for a secondary click.
     var onMenu: (() -> NSMenu?)?
+    /// A control inside that takes its own clicks while it is shown.
+    var passThroughView: NSView?
 
     private var pressLocation: NSPoint?
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        frame.contains(point) ? self : nil
+        guard frame.contains(point) else { return nil }
+        if let passThroughView, !passThroughView.isHidden, let hit = passThroughView.hitTest(convert(point, from: superview)) {
+            return hit
+        }
+        return self
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }

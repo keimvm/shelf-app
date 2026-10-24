@@ -8,9 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var shelf = ShelfController(storage: storage)
     private lazy var dragMonitor = GlobalDragMonitor(preferences: preferences)
     private let shelfHotKey = GlobalHotKey()
-    private let service = ShelfService()
     private var statusItemController: StatusItemController?
-    /// The unit tests run inside this app. The app then leaves the user's shortcut, services, and the
+    /// The unit tests run inside this app. The app then leaves the user's shortcut and the
     /// files of a Shelf running at the same time (same container) alone.
     private let isHostingTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
@@ -23,9 +22,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         shelfHotKey.onPress = { [shelf] in shelf.toggle(near: NSEvent.mouseLocation) }
         shelfHotKey.register(preferences.shelfHotKey)
-
-        service.onReceive = { [shelf] pasteboard in shelf.put(from: pasteboard, near: NSEvent.mouseLocation) }
-        NSApp.servicesProvider = service
 
         dragMonitor.onShake = { [shelf] point in shelf.show(near: point) }
         dragMonitor.isOverShelf = { [shelf] point in shelf.contains(point) }

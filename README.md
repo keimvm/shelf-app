@@ -6,7 +6,7 @@
 
 - macOS 14 以降。Apple Silicon と Intel のユニバーサルバイナリ。
 - ad-hoc 署名（Developer ID の署名と公証はしていない）。
-- Accessibility・オートメーションなどの権限は求めない。Sandbox の Entitlements は 3 つだけで、読めるのはドロップやサービスで渡したものに限る。
+- Accessibility・オートメーションなどの権限は求めない。Sandbox の Entitlements は 3 つだけで、読めるのはドロップで渡したものに限る。
 - 仕様と設計の原則は [docs/PRD.md](docs/PRD.md)、OS の挙動の検証結果は [docs/verification.md](docs/verification.md) を参照。
 
 ## 使い方
@@ -24,14 +24,14 @@
 ### 置く
 
 - シェルフへドロップする。置けるもの：ファイル（複数可）、ブラウザのテキスト・URL・画像。テキストは `.txt`、URL は `.webloc` としてシェルフの一時ファイルになる。
-- **Shelf に置く**：どのアプリでも、ファイル・テキスト・リンクを選択して ⌃⌥⌘P を押すと、シェルフに置ける。右クリック → サービス →「Shelf に置く」でも同じ。ショートカットはシステム設定 → キーボード → キーボードショートカット → サービスで変えられる。
 
 ### 取り出す・外す
 
 - 項目をドラッグして別のアプリへ渡す。ハンドル右端のアイコン（項目数を表示）をドラッグすると、全項目をまとめて渡せる。
 - 取り出しは常にコピーになる。同じボリュームの Finder へドロップしても原本は元の場所に残る。
 - 取り出した項目はシェルフから消え、空になったシェルフは自動で隠れる。上部のハンドルで移動、− で隠す。
-- 項目を右クリックすると「Finder に表示」「シェルフから外す」。全部消すにはメニューの「シェルフを空にする」。
+- 項目にポインタを乗せると左上に × が出る。クリックするとその項目をシェルフから外す。
+- 項目を右クリックすると「Finder に表示」「シェルフから外す」「シェルフを空にする」。項目のない所の右クリックや、メニューバーの「シェルフを空にする」でも全部消せる。
 - 置いた後に原本を移動・リネームしても追従する。削除またはゴミ箱へ移動すると「見つかりません」と表示され、取り出せなくなる（戻せば再び取り出せる）。
 - 一時ファイル（テキスト・URL・画像）は、その項目がシェルフを離れると消える（取り出した場合は 30 秒後）。シェルフの内容はアプリを終了すると残らない。
 
@@ -50,7 +50,7 @@
 ### 0.1 からの変更
 
 - シェルフは 1 つになった（0.1 は最大 10 個）。× で閉じる代わりに − で隠し、中身は残る。
-- 「ショートカットで Finder の選択項目を置く」はなくなり、サービス「Shelf に置く」（⌃⌥⌘P）になった。Finder 以外のアプリやテキスト・リンクにも使え、オートメーションの許可とディスク全体の読み取りは不要になった。
+- 「ショートカットで Finder の選択項目を置く」はなくなった。オートメーションの許可とディスク全体の読み取りは不要になった。代わりに入れたサービス「Shelf に置く」（⌃⌥⌘P）も、ショートカットをアプリで設定できないため削除した（[PRD §9.1](docs/PRD.md)）。
 - 0.1 で変えた表示のショートカットはそのまま引き継ぐ。
 
 ## インストール
@@ -89,7 +89,7 @@ curl -fL -o /tmp/Shelf.zip https://github.com/keimvm/shelf-app/releases/latest/d
 xcodebuild test -project Shelf.xcodeproj -scheme Shelf -derivedDataPath build/DerivedData.noindex
 ```
 
-テストは Debug の Shelf.app の中で動くが、そのときアプリは組み立てないので、起動中の Shelf のショートカットや一時ファイルには触れない。ただし LaunchServices に Debug の Shelf.app が登録され、サービスメニューに「Shelf に置く」が 2 つ出ることがある。そのときは登録を外す：
+テストは Debug の Shelf.app の中で動くが、そのときアプリは組み立てないので、起動中の Shelf のショートカットや一時ファイルには触れない。ただし LaunchServices に Debug の Shelf.app が登録されることがある。そのときは登録を外す：
 
 ```sh
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u build/DerivedData.noindex/Build/Products/Debug/Shelf.app

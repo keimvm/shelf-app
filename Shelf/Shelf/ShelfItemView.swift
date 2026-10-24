@@ -1,8 +1,8 @@
 import AppKit
 
-/// One shelf item in the collection view: icon and name (F11). Dragging it takes the item out (F6), and
-/// a secondary click opens its menu (F14). An item whose original is gone is dimmed and marked
-/// "見つかりません" (F10).
+/// One shelf item in the collection view: icon and name (F11). Dragging it takes the item out (F6), the ×
+/// shown while the pointer is over it takes it off, and a secondary click opens its menu (F14). An item
+/// whose original is gone is dimmed and marked "見つかりません" (F10).
 final class ShelfItemView: NSCollectionViewItem {
     static let identifier = NSUserInterfaceItemIdentifier("ShelfItemView")
     static let size = NSSize(width: 76, height: 84)
@@ -11,8 +11,20 @@ final class ShelfItemView: NSCollectionViewItem {
     var onDragOut: ((ShelfItemView, NSEvent) -> Void)?
     /// Makes the menu for a secondary click on this item.
     var onMenu: ((ShelfItemView) -> NSMenu?)?
+    /// Called when the × is clicked.
+    var onRemove: ((ShelfItemView) -> Void)?
+
+    /// Whether the pointer is over this item, which shows the ×.
+    var isHovered = false {
+        didSet { removeButton.isHidden = !isHovered }
+    }
 
     private let status = NSTextField(labelWithString: "見つかりません")
+    private lazy var removeButton = FirstMouseButton(
+        image: NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "シェルフから外す")!,
+        target: self,
+        action: #selector(remove(_:))
+    )
 
     var item: ShelfItem? {
         didSet {
@@ -41,6 +53,11 @@ final class ShelfItemView: NSCollectionViewItem {
         status.alignment = .center
         status.isHidden = true
 
+        removeButton.isBordered = false
+        removeButton.contentTintColor = .secondaryLabelColor
+        removeButton.toolTip = "シェルフから外す"
+        removeButton.isHidden = true
+
         let container = ShelfDragOriginView()
         container.onDragOut = { [weak self] event in
             guard let self else { return }
@@ -50,7 +67,8 @@ final class ShelfItemView: NSCollectionViewItem {
             guard let self else { return nil }
             return onMenu?(self)
         }
-        for subview in [icon, label, status] {
+        container.passThroughView = removeButton
+        for subview in [icon, label, status, removeButton] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(subview)
         }
@@ -67,11 +85,24 @@ final class ShelfItemView: NSCollectionViewItem {
             status.topAnchor.constraint(equalTo: label.bottomAnchor),
             status.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 2),
             status.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -2),
+
+            // On the icon's top-left corner.
+            removeButton.centerXAnchor.constraint(equalTo: icon.leadingAnchor, constant: 6),
+            removeButton.centerYAnchor.constraint(equalTo: icon.topAnchor, constant: 6),
         ])
 
         view = container
         imageView = icon
         textField = label
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        isHovered = false
+    }
+
+    @objc private func remove(_ sender: NSButton) {
+        onRemove?(self)
     }
 }
 

@@ -2,8 +2,8 @@ import AppKit
 import os
 
 /// Content of the shelf panel: a handle bar with a hide button and a drag-all control above the item
-/// grid. The whole panel accepts drops (F5); items are dragged out one at a time or all at once (F6),
-/// and each has a menu to show it in Finder or take it off (F14).
+/// grid. The whole panel accepts drops (F5); items are dragged out one at a time or all at once (F6).
+/// Each item has a × and a menu to take it off, and the menus can empty the shelf (F14).
 final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
     static let handleHeight: CGFloat = 28
 
@@ -11,8 +11,10 @@ final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
     var onHide: (() -> Void)?
     /// Called with the URLs a destination took in a drag out (F6).
     var onTakeOut: (([URL]) -> Void)?
-    /// Called with the URLs the user took off through a menu (F14).
+    /// Called with the URLs the user took off with the × or a menu (F14).
     var onRemove: (([URL]) -> Void)?
+    /// Called when the user empties the shelf through a menu (F14).
+    var onClear: (() -> Void)?
 
     private let shelf: Shelf
     private let reader: InboundReader
@@ -137,15 +139,28 @@ final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
             hint.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
             hint.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
         ])
+        // Secondary clicks outside the items come up to here.
+        background.menu = makeShelfMenu()
         view = background
         // Originals may have moved since the last look; check when the pointer comes over the shelf (F10).
-        background.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+        // Moves show the × of the item under the pointer.
+        background.addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect], owner: self))
 
         reload()
     }
 
     override func mouseEntered(with event: NSEvent) {
         shelf.refreshFiles()
+        updateHover()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        updateHover()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        updateHover()
     }
 
     /// Shows the shelf's current items.
@@ -155,6 +170,19 @@ final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
         dragAll.isHidden = available == 0
         dragAllCount.stringValue = "\(available)"
         collectionView.reloadData()
+        // The pointer may now be over another item, as after clicking a × (the next item takes its place).
+        collectionView.layoutSubtreeIfNeeded()
+        updateHover()
+    }
+
+    /// Marks the item under the pointer as hovered and the others not.
+    private func updateHover() {
+        guard let window = view.window else { return }
+        let point = collectionView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        let hovered = collectionView.visibleRect.contains(point) ? collectionView.indexPathForItem(at: point) : nil
+        for indexPath in collectionView.indexPathsForVisibleItems() {
+            (collectionView.item(at: indexPath) as? ShelfItemView)?.isHovered = indexPath == hovered
+        }
     }
 
     private func dragOut(from itemView: ShelfItemView, event: NSEvent) {
@@ -192,6 +220,12 @@ final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
         onTakeOut?(source.urls)
     }
 
+    /// Takes the item of `itemView` off (F14).
+    private func remove(_ itemView: ShelfItemView) {
+        guard let index = collectionView.indexPath(for: itemView)?.item, shelf.items.indices.contains(index) else { return }
+        onRemove?([shelf.items[index].url])
+    }
+
     /// The menu of one item (F14). A missing original cannot be shown in Finder.
     private func menu(for itemView: ShelfItemView) -> NSMenu? {
         guard let index = collectionView.indexPath(for: itemView)?.item, shelf.items.indices.contains(index) else { return nil }
@@ -204,7 +238,24 @@ final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
         menu.autoenablesItems = false
         menu.addItem(reveal)
         menu.addItem(ActionMenuItem(title: "シェルフから外す") { [weak self] in self?.onRemove?([item.url]) })
+        menu.addItem(.separator())
+        menu.addItem(makeClearItem())
         return menu
+    }
+
+    /// The menu of the shelf outside its items (F14).
+    private func makeShelfMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.delegate = self
+        menu.autoenablesItems = false
+        menu.addItem(makeClearItem())
+        return menu
+    }
+
+    private func makeClearItem() -> NSMenuItem {
+        let item = ActionMenuItem(title: "シェルフを空にする") { [weak self] in self?.onClear?() }
+        item.isEnabled = !shelf.items.isEmpty
+        return item
     }
 
     private static func iconFrame(centeredAt center: NSPoint) -> NSRect {
@@ -227,8 +278,15 @@ final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
             itemView.item = shelf.items[indexPath.item]
             itemView.onDragOut = { [weak self] itemView, event in self?.dragOut(from: itemView, event: event) }
             itemView.onMenu = { [weak self] itemView in self?.menu(for: itemView) }
+            itemView.onRemove = { [weak self] itemView in self?.remove(itemView) }
         }
         return view
+    }
+}
+
+extension ShelfViewController: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.items.forEach { $0.isEnabled = !shelf.items.isEmpty }
     }
 }
 
@@ -248,7 +306,7 @@ private final class ShelfHandleView: NSView {
 }
 
 /// The panel is usually not key while another app is active; take the first click anyway (verification.md K2).
-private final class FirstMouseButton: NSButton {
+final class FirstMouseButton: NSButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
