@@ -42,4 +42,12 @@ struct HotKeyTests {
         Preferences(defaults: defaults).newShelfHotKey = nil
         #expect(Preferences(defaults: defaults).newShelfHotKey == nil)
     }
+
+    @Test func placingFinderSelectionIsOffUntilTurnedOn() {
+        let defaults = UserDefaults(suiteName: "HotKeyTests-\(UUID().uuidString)")!
+        #expect(!Preferences(defaults: defaults).placesFinderSelection)
+
+        Preferences(defaults: defaults).placesFinderSelection = true
+        #expect(Preferences(defaults: defaults).placesFinderSelection)
+    }
 }

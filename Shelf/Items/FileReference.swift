@@ -7,12 +7,19 @@ import Foundation
 struct FileReference: Equatable, Sendable {
     private(set) var url: URL
     private(set) var bookmark: Data?
+    /// Whether `bookmark` is security-scoped. A file that came without a sandbox extension (F13) is
+    /// read through the read-only file exception, which cannot make one; it gets a plain bookmark.
+    private(set) var isSecurityScoped = true
     /// The original was deleted or moved to the Trash. It is looked for again on the next refresh.
     private(set) var isMissing = false
 
     init(url: URL) {
         self.url = url
         bookmark = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+        if bookmark == nil {
+            bookmark = try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+            isSecurityScoped = false
+        }
     }
 
     /// The reference after following a move or rename through the bookmark (F10).
@@ -26,23 +33,28 @@ struct FileReference: Equatable, Sendable {
             return copy
         }
         var isStale = false
+        // Resolving a plain bookmark with `.withSecurityScope` fails (verification.md §5).
+        let scope: URL.BookmarkResolutionOptions = isSecurityScoped ? .withSecurityScope : []
         guard let resolved = try? URL(
             resolvingBookmarkData: bookmark,
-            options: [.withSecurityScope, .withoutUI, .withoutMounting],
+            options: scope.union([.withoutUI, .withoutMounting]),
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         ) else {
             copy.isMissing = true
             return copy
         }
-        startAccess(resolved)
+        if isSecurityScoped {
+            startAccess(resolved)
+        }
         guard Self.isPresent(resolved) else {
             copy.isMissing = true
             return copy
         }
         copy.url = resolved
         copy.isMissing = false
-        if isStale, let fresh = try? resolved.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
+        let creation: URL.BookmarkCreationOptions = isSecurityScoped ? .withSecurityScope : []
+        if isStale, let fresh = try? resolved.bookmarkData(options: creation, includingResourceValuesForKeys: nil, relativeTo: nil) {
             copy.bookmark = fresh
         }
         return copy

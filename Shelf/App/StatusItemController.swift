@@ -11,6 +11,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let newShelfHotKey: GlobalHotKey
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let newShelfItem = NSMenuItem(title: "新規シェルフ", action: #selector(newShelf(_:)), keyEquivalent: "")
+    private let finderSelectionItem = NSMenuItem(
+        title: "ショートカットで Finder の選択項目を置く", action: #selector(toggleFinderSelection(_:)), keyEquivalent: "")
     private let shakeItem = NSMenuItem(title: "シェイクで開く", action: #selector(toggleShake(_:)), keyEquivalent: "")
     private var sensitivityItems: [NSMenuItem] = []
     private let loginItem = NSMenuItem(title: "ログイン時に開く", action: #selector(toggleOpenAtLogin(_:)), keyEquivalent: "")
@@ -34,6 +36,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let shortcutItem = NSMenuItem(title: "新規シェルフのショートカット…", action: #selector(changeNewShelfShortcut(_:)), keyEquivalent: "")
         shortcutItem.target = self
         menu.addItem(shortcutItem)
+        finderSelectionItem.target = self
+        menu.addItem(finderSelectionItem)
         menu.addItem(.separator())
 
         shakeItem.target = self
@@ -65,6 +69,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let hotKey = newShelfHotKey.hotKey
         newShelfItem.keyEquivalent = hotKey?.keyEquivalent ?? ""
         newShelfItem.keyEquivalentModifierMask = hotKey?.modifiers ?? []
+        finderSelectionItem.state = preferences.placesFinderSelection ? .on : .off
         shakeItem.state = preferences.isShakeEnabled ? .on : .off
         let current = preferences.shakeSensitivity.rawValue
         for item in sensitivityItems {
@@ -101,6 +106,21 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         shortcutRecorder = recorder
         recorder.show()
+    }
+
+    /// Turning it on asks for permission to automate Finder first (F13). When the user has denied it,
+    /// only System Settings can allow it, so that is opened and the setting stays off.
+    @objc private func toggleFinderSelection(_ sender: NSMenuItem) {
+        guard !preferences.placesFinderSelection else {
+            preferences.placesFinderSelection = false
+            return
+        }
+        FinderSelection.requestPermission { [preferences] granted in
+            preferences.placesFinderSelection = granted
+            if !granted, let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+                NSWorkspace.shared.open(url)
+            }
+        }
     }
 
     @objc private func toggleShake(_ sender: NSMenuItem) {

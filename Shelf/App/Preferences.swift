@@ -6,6 +6,7 @@ final class Preferences {
         static let shakeEnabled = "shakeEnabled"
         static let shakeSensitivity = "shakeSensitivity"
         static let newShelfHotKey = "newShelfHotKey"
+        static let placesFinderSelection = "placesFinderSelection"
     }
 
     private let defaults: UserDefaults
@@ -16,7 +17,15 @@ final class Preferences {
             Key.shakeEnabled: true,
             Key.shakeSensitivity: ShakeSensitivity.standard.rawValue,
             Key.newShelfHotKey: Self.dictionary(for: .newShelfDefault),
+            Key.placesFinderSelection: false,
         ])
+    }
+
+    /// Whether the new-shelf shortcut puts the files selected in Finder on the shelf (F13). Off by
+    /// default because it needs permission to automate Finder.
+    var placesFinderSelection: Bool {
+        get { defaults.bool(forKey: Key.placesFinderSelection) }
+        set { defaults.set(newValue, forKey: Key.placesFinderSelection) }
     }
 
     var isShakeEnabled: Bool {

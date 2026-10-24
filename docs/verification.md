@@ -175,3 +175,86 @@
 - Safari に検証ページのタブ（`127.0.0.1:8765`、サーバーは停止済み）、Finder に `work/src`・`work/dest` のウィンドウが残っている。Finder のウィンドウを一時的にフルスクリーンにした（解除済み）。
 - Xcode のデバッガ下で動いていた Shelf に SIGTERM を送った。プロセスはデバッガで一時停止したまま残っている。
 - Shelf の感度設定を切り替えながら計測し、最後に元の「高」へ戻した。
+
+## 4. Services による「新規シェルフに置く」の検証（2026-10-24）
+
+F13（選択中のファイルをショートカットで新規シェルフに置く）の前提を確かめた。一度は Services で実装したが、新規シェルフのショートカット（F12）と同じキーにできないため採用せず、§5 の方式にした。
+
+### 4.1 方法
+
+- コード：[spikes/services](../spikes/services/README.md)。いずれも使い捨て。
+  - `ServiceSpike`：Sandbox 有効（Entitlements は N2 の 3 つ）、`LSUIElement`。`NSServices` に、ファイルを受け取るサービス（`NSSendFileTypes` = `public.item`）と、何も受け取らないサービスを宣言する。受け取った URL の読み取り可否・bookmark の作成可否・`frontmostApplication` をログに出す。
+  - `Driver`：`CGEvent` でキーを押す。
+- Finder でフォルダを開いて ⌘A で全選択し、サービスのショートカットを押した。
+- 製品のビルド（Debug）でも同じ操作をし、棚から Finder へ取り出した。
+- 環境：macOS 27.0.1（26A434）。
+
+### 4.2 結果
+
+**事実**
+- Finder で選択中のファイル・フォルダが、サービスのペーストボード（`public.file-url`、`NSFilenamesPboardType` など）でファイル URL として届いた。
+- 起動時に読めなかったファイル（対照：`readable=false`）も、サービスで受け取った後は読めた。60 秒後も読めた。`.withSecurityScope` の bookmark も作れた。ドロップ（U3）と同じく、Entitlements を増やさずに扱える。
+- `NSKeyEquivalent` の既定値は ⌘ 以外の修飾キーも書ける（`$^~@N` = ⇧⌃⌥⌘N）。サードパーティのアプリでも、その既定値のショートカットでサービスが動いた。
+- 同じ組み合わせを `RegisterEventHotKey` でも登録していると、ホットキーが受け取り、サービスは動かなかった。
+- 同じショートカットを 2 つのサービスに宣言すると、Finder でファイルを選択していてもいなくても、何も受け取らないほうのサービスが動いた（選択の有無で振り分けられない）。
+- サービスを実行するとき、システムは提供側のアプリをアクティブにする（ハンドラの時点で `frontmostApplication` が提供側）。`NSApp.deactivate()` では Finder に戻らなかった。直前にアクティブだったアプリ（`NSWorkspace.didActivateApplicationNotification` で記録）に `activate()` すると、Finder が最前面に戻った。
+- 提供側が起動していないときは、システムが起動してからハンドラを呼んだ（`servicesProvider` は `applicationDidFinishLaunching` で設定）。この場合、起動時点ですでに提供側が最前面で、直前のアプリを記録できなかった。
+- アプリを `open` で起動すると、`pbs -update` を実行しなくてもサービスが登録された（`pbs -dump` で確認）。
+- 製品のビルドで、Finder の 2 項目（ファイルとフォルダ）がサムネイル付きで新規シェルフに並び、操作後も `frontmostApplication` は Finder だった。並んだファイルを Finder へ取り出すとコピーになった（operation 1、宛先は新しい inode）。
+
+**推測**
+- ⌃⌥⌘N（新規シェルフ）と同じショートカットで「選択があれば置く、なければ空」を切り替える方法は、Services では見当たらない。
+- ショートカットの変更はシステム設定（キーボード → キーボードショートカット → サービス）で行える。Sandbox のアプリからは変更できない。
+
+**未確認（残り）**
+- 実際のキー入力での確認（合成イベントのみ）。
+- Finder 以外のアプリ（ファイルをサービスに渡せるもの）からの利用。
+- Shelf が起動していない状態からサービスで起動したときに、元のアプリへフォーカスが戻らないこと（スパイクでは戻らなかった。製品は通常ログイン時に起動しているため影響は小さい見込み）。
+
+### 4.3 検証環境への影響
+
+- テストファイルは `spikes/services/work/` に作成した（git 管理外）。Finder に開いた検証用のタブは閉じた。
+- `/Applications/Shelf.app` を一度終了し、検証後に起動し直した。検証用のビルド（`ServiceSpike.app`、Debug の `Shelf.app`）は LaunchServices から登録を外した。
+- 取り出しの試行のうち 1 回は、ドロップ位置が Finder ではなく Claude のウィンドウ上になり、そちらが `a.txt` を受け取った（operation 1）。
+
+## 5. Apple Events による Finder の選択項目の取得（2026-10-24）
+
+F13 を新規シェルフのショートカット（F12）と同じキーで実現する方式を確かめた。ショートカットを押した時点で Finder に選択を問い合わせる。
+
+### 5.1 方法
+
+- コード：[spikes/finder-open](../spikes/finder-open/README.md)。使い捨て。
+  - `OpenSpike`：Sandbox 有効、`LSUIElement`。開くよう渡されたファイル（`application(_:open:)`）と、渡されていないファイル（対照）について、読み取り・bookmark の作成・解決をログに出す。
+- Finder への問い合わせは製品のビルドで確かめた。Driver（spikes/services）で F1（`fn` 付き）を押し、Phase 0 の `ShelfSpike`（Sandbox 有効）を取り出し先にした。
+- 環境：macOS 27.0.1（26A434）。
+
+### 5.2 結果
+
+**事実**
+- Finder に「選択項目を Sandbox のアプリで開く」よう頼む方法（`open selection using <app>`）は使えなかった。書類タイプを宣言していないと `kLSAppDoesNotClaimTypeErr`（-10820）。`CFBundleTypeRole` = `None` でも同じ。`Viewer`（`LSHandlerRank` = `None`）にすると、今度は「呼び出し元にその場所への Sandbox アクセスがない」として -54 で拒否された。Sandbox の外から AppleScript を送っても同じだった。`open -a` で同じアプリに渡すと、拡張付きで開けた。
+- 失敗したときは CoreServicesUIAgent がエラーを表示した（`frontmostApplication` が `com.apple.coreservices.uiagent` になった）。
+- Sandbox のアプリは、渡されていないファイルを読めず、bookmark も作れない（`Could not open() the item`）。
+- `temporary-exception.files.absolute-path.read-only`（`/`）を付けると、渡されていないファイルを読めた。security-scoped bookmark は作れなかった（同じエラー）が、通常の bookmark は作れ、リネーム後に新しい場所へ解決できた（stale = true）。通常の bookmark を `.withSecurityScope` 付きで解決すると失敗した。
+- 例外を付けたアプリで `~/Desktop` を読もうとすると、tccd に `kTCCServiceSystemPolicyDesktopFolder` の記録ができた。
+- 製品（Entitlements に `automation.apple-events`、`temporary-exception.apple-events` = `com.apple.finder`、上の読み取り例外を追加）で：
+  - 設定をオンにすると「オートメーション」の確認が出て、許可すると `AEDeterminePermissionToAutomateTarget` は `noErr` を返した。
+  - Finder でファイル 2 つとフォルダ 1 つを選択して F1 を押すと、3 項目が並んだ新規シェルフが開いた。Finder は最前面のままだった。選択が 1 項目のときは 1 項目だけが並んだ。
+  - そのファイルを `ShelfSpike`（Sandbox 有効）へドラッグすると、受け取り側で読めて security-scoped bookmark も作れた（operation 1）。
+  - 原本をリネームしてカーソルを棚に乗せると、項目名が新しい名前になった。
+
+**推測**
+- Shelf が拡張を発行できるのは、読み取り例外で読めるため。
+- デスクトップ・書類など保護されたフォルダの項目は、フォルダごとに初回だけ macOS がアクセスの許可を確認する。
+
+**未確認（残り）**
+- 実際のキー入力での確認（合成イベントのみ）。
+- 保護されたフォルダ（デスクトップ・書類・ダウンロード・iCloud Drive）の項目での動作と、確認を拒否したときの表示。
+- 外部ボリューム・ネットワークボリュームの項目。
+
+### 5.3 検証環境への影響
+
+- テストファイルは `spikes/finder-open/work/` に作成した（git 管理外）。リネームした原本は元に戻した。
+- `OpenSpike` が `~/Desktop` を読もうとしたため、デスクトップフォルダへのアクセスの確認が出た可能性がある（確認中にプロセスを終了した）。
+- Finder に開かせる試行で、CoreServicesUIAgent のエラーダイアログが何度か出た可能性がある。
+- `/Applications/Shelf.app` を入れ替えた。メニューの「ショートカットで Finder の選択項目を置く」をオンにし、Finder のオートメーションはユーザーが許可した。
+- スパイクと検証用のビルドは LaunchServices から登録を外した。

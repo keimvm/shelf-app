@@ -23,10 +23,11 @@ final class ShelfManager {
         self.storage = storage
     }
 
-    /// Shows a new shelf centered on `point` (global, bottom-left origin), kept inside that screen.
-    /// The app is not activated. Returns nil, with a beep, when `maxShelves` are already open.
+    /// Shows a new shelf centered on `point` (global, bottom-left origin), kept inside that screen,
+    /// holding `items` (F13). The app is not activated. Returns nil, with a beep, when `maxShelves` are
+    /// already open.
     @discardableResult
-    func presentShelf(near point: CGPoint) -> ShelfPanel? {
+    func presentShelf(near point: CGPoint, holding items: [ShelfItem] = []) -> ShelfPanel? {
         guard entries.count < Self.maxShelves else {
             log.info("Not opening a shelf: \(Self.maxShelves) already open")
             NSSound.beep()
@@ -38,6 +39,7 @@ final class ShelfManager {
         let frame = Self.frame(for: Self.shelfSize, centeredAt: point, in: visibleFrame)
 
         let shelf = Shelf()
+        shelf.append(items)
         let directory: URL
         do {
             directory = try storage.directory(for: shelf.id)
