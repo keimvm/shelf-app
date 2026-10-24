@@ -77,14 +77,41 @@ final class InboundReader {
             return false
         }
 
+        @MainActor final class Reception {
+            var remainingFileCount = 0
+            var hasFailures = false
+            var receivedURLs: [URL] = []
+        }
+        let reception = Reception()
         for receiver in receivers {
             receiver.receivePromisedFiles(atDestination: destination, options: [:], operationQueue: Self.promiseQueue) { @Sendable url, error in
                 // Runs on `promiseQueue`, not the main actor.
                 Task { @MainActor in
                     if let error {
                         Self.log.error("Promised file failed: \(error.localizedDescription, privacy: .public)")
+                        // The API says to ignore the callback URL when delivery fails.
+                        reception.hasFailures = true
                     } else {
+                        reception.receivedURLs.append(url)
                         completion([.generated(url, .promise)])
+                    }
+                    reception.remainingFileCount -= 1
+                    if reception.remainingFileCount == 0 {
+                        // Keep the shared folder until every delivery finishes: deleting it after an
+                        // early failure would prevent later files in this drop from being written.
+                        if reception.hasFailures {
+                            let receivedPaths = reception.receivedURLs.map { $0.standardizedFileURL.pathComponents }
+                            let contents = (try? FileManager.default.contentsOfDirectory(at: destination, includingPropertiesForKeys: nil)) ?? []
+                            for file in contents {
+                                let path = file.standardizedFileURL.pathComponents
+                                if !receivedPaths.contains(where: { $0.starts(with: path) }) {
+                                    self.storage.discard(file)
+                                }
+                            }
+                        }
+                        if (try? FileManager.default.contentsOfDirectory(atPath: destination.path))?.isEmpty == true {
+                            self.storage.discard(destination)
+                        }
                     }
                     // Add a delivered item before allowing the shelf to close.
                     self.pendingFileCount -= 1
@@ -92,7 +119,9 @@ final class InboundReader {
             }
             // fileNames is populated by receivePromisedFiles; fileTypes can undercount legacy promises.
             // Even a request that fails without a file name reports an error through its callback.
-            pendingFileCount += max(1, receiver.fileNames.count)
+            let fileCount = max(1, receiver.fileNames.count)
+            reception.remainingFileCount += fileCount
+            pendingFileCount += fileCount
         }
         return true
     }

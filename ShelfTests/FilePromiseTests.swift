@@ -31,7 +31,15 @@ private final class DeferredPromiseReceiver: NSFilePromiseReceiver {
     func deliverNext(error: (any Error)? = nil) {
         let url = destination!.appendingPathComponent(names[nextFile])
         nextFile += 1
-        reader!(url, error)
+        // The failure URL is unspecified by the API; cleanup must not use it to delete a file.
+        reader!(error == nil ? url : destination!, error)
+    }
+
+    /// Writes before reporting success or failure, like a provider that may leave a partial file.
+    func writeNextFile() throws -> URL {
+        let url = destination!.appendingPathComponent(names[nextFile])
+        try Data("promised contents".utf8).write(to: url)
+        return url
     }
 }
 
@@ -148,5 +156,44 @@ final class FilePromiseTests {
         await deliver(receiver, error: NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError))
         #expect(reader.pendingFileCount == 0)
         #expect(controller.isVisible)
+        #expect((try? FileManager.default.contentsOfDirectory(atPath: storage.root.path)) == [])
+    }
+
+    @Test func failedReceptionDeletesItsPartialFileAndFolder() async throws {
+        let receiver = DeferredPromiseReceiver(names: ["partial.txt"])
+        receive(receiver)
+        let partial = try receiver.writeNextFile()
+
+        await deliver(receiver, error: NSError(domain: NSCocoaErrorDomain, code: NSFileWriteUnknownError))
+
+        #expect(reader.pendingFileCount == 0)
+        #expect(shelf.items.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: partial.path))
+        #expect(!FileManager.default.fileExists(atPath: partial.deletingLastPathComponent().path))
+    }
+
+    @Test(arguments: [0, 1])
+    func failedReceptionPreservesOtherFilesInTheDrop(failedIndex: Int) async throws {
+        let receiver = DeferredPromiseReceiver(names: ["first.txt", "second.txt"])
+        receive(receiver)
+        var files: [URL] = []
+        for index in 0..<2 {
+            let url = try receiver.writeNextFile()
+            files.append(url)
+            let error = index == failedIndex ? NSError(domain: NSCocoaErrorDomain, code: NSFileWriteUnknownError) : nil
+            await deliver(receiver, error: error)
+            if index == 0 {
+                // The next provider still needs this folder, even if the first delivery failed.
+                #expect(FileManager.default.fileExists(atPath: url.deletingLastPathComponent().path))
+            }
+        }
+
+        let kept = files[1 - failedIndex]
+        #expect(reader.pendingFileCount == 0)
+        #expect(shelf.items.map(\.url) == [kept])
+        #expect(FileManager.default.fileExists(atPath: kept.path))
+        #expect(!FileManager.default.fileExists(atPath: files[failedIndex].path))
+        takeAll()
+        #expect(!FileManager.default.fileExists(atPath: kept.deletingLastPathComponent().path))
     }
 }
