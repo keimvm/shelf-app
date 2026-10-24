@@ -6,6 +6,8 @@ import AppKit
 @MainActor
 final class ShelfController {
     static let size = CGSize(width: 260, height: 200)
+    /// Space between the cursor and the shelf shown beside it, so the item under the cursor stays in view.
+    static let gap: CGFloat = 32
     /// How long a generated file outlives its item after it was dragged out. The destination may still
     /// be copying it after the drop.
     static let temporaryFilesGrace: TimeInterval = 30
@@ -37,16 +39,14 @@ final class ShelfController {
 
     var isVisible: Bool { panel?.isVisible ?? false }
 
-    /// Shows the shelf with its hide button on `point` (global, bottom-left origin), kept inside that
-    /// screen, so the shelf itself lies beside the cursor. A shelf already on screen comes over to
-    /// `point` unless it is under it. The app is not activated (F4).
+    /// Shows the shelf beside `point` (global, bottom-left origin), kept inside that screen. A shelf
+    /// already on screen comes over to `point` unless it is under it. The app is not activated (F4).
     func show(near point: CGPoint) {
         let panel = panel ?? makePanel()
         if panel.isVisible, NSMouseInRect(point, panel.frame, false) { return }
         let screen = NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) } ?? NSScreen.main
         let visibleFrame = screen?.visibleFrame ?? CGRect(origin: .zero, size: Self.size)
-        let frame = Self.frame(for: Self.size, putting: ShelfViewController.hideButtonCenter, at: point, in: visibleFrame)
-        panel.setFrame(frame, display: true)
+        panel.setFrame(Self.frame(for: Self.size, beside: point, gap: Self.gap, in: visibleFrame), display: true)
         if !panel.isVisible {
             panel.orderFrontRegardless()
             onChange?()
@@ -116,10 +116,11 @@ final class ShelfController {
         return panel
     }
 
-    /// A frame of `size` with `anchor` (measured from its top-left corner) at `point`, shifted as little
-    /// as needed to fit in `bounds`.
-    nonisolated static func frame(for size: CGSize, putting anchor: CGPoint, at point: CGPoint, in bounds: CGRect) -> CGRect {
-        var origin = CGPoint(x: point.x - anchor.x, y: point.y - (size.height - anchor.y))
+    /// A frame of `size` vertically centered on `point`, `gap` to its right, or to its left when the right
+    /// side of `bounds` has no room. Shifted as little as needed to fit in `bounds`.
+    nonisolated static func frame(for size: CGSize, beside point: CGPoint, gap: CGFloat, in bounds: CGRect) -> CGRect {
+        var origin = CGPoint(x: point.x + gap, y: point.y - size.height / 2)
+        if origin.x + size.width > bounds.maxX { origin.x = point.x - gap - size.width }
         origin.x = min(max(origin.x, bounds.minX), bounds.maxX - size.width)
         origin.y = min(max(origin.y, bounds.minY), bounds.maxY - size.height)
         return CGRect(origin: origin, size: size)

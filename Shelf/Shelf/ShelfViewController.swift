@@ -5,10 +5,7 @@ import os
 /// grid. The whole panel accepts drops (F5); items are dragged out one at a time or all at once (F6).
 /// Each item has a × and a menu to take it off, and the menus can empty the shelf (F14).
 final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
-    nonisolated static let handleHeight: CGFloat = 28
-    /// Center of the hide button, measured from the panel's top-left corner. The shelf is shown with
-    /// this point under the cursor (F4).
-    nonisolated static let hideButtonCenter = CGPoint(x: 16, y: handleHeight / 2)
+    static let handleHeight: CGFloat = 28
 
     /// Called when the hide button is clicked.
     var onHide: (() -> Void)?
@@ -122,7 +119,7 @@ final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
             handle.trailingAnchor.constraint(equalTo: background.trailingAnchor),
             handle.heightAnchor.constraint(equalToConstant: Self.handleHeight),
 
-            hideButton.centerXAnchor.constraint(equalTo: background.leadingAnchor, constant: Self.hideButtonCenter.x),
+            hideButton.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 8),
             hideButton.centerYAnchor.constraint(equalTo: handle.centerYAnchor),
 
             dragAll.trailingAnchor.constraint(equalTo: background.trailingAnchor, constant: -6),
