@@ -1,9 +1,10 @@
 import Foundation
 
-/// Per-shelf temporary directories for files the app creates (F8, F9, N5).
+/// The files the app writes for the shelf: text, web links, and promised files (F8, F9, N5).
 ///
-/// Everything lives under `<container tmp>/Shelves/<shelfID>/`. A shelf's directory is removed when
-/// the shelf closes, and leftovers from a previous run are removed at launch.
+/// Everything lives under `<container tmp>/Shelves/`. A file is deleted when its item leaves the shelf,
+/// and anything left over is deleted when the app quits and when it launches. Nothing outside that
+/// directory is ever deleted (N1).
 struct TemporaryStorage: Sendable {
     let root: URL
 
@@ -11,19 +12,30 @@ struct TemporaryStorage: Sendable {
         self.root = root
     }
 
-    /// The directory for a shelf, created if needed.
-    func directory(for shelfID: UUID) throws -> URL {
-        let url = root.appendingPathComponent(shelfID.uuidString, isDirectory: true)
+    /// The directory, created if needed.
+    func directory() throws -> URL {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    /// A new folder in the directory, so that files delivered with the same name do not collide.
+    func makeFolder() throws -> URL {
+        let url = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
 
-    /// Deletes a shelf's directory. Returns whether it is gone afterwards.
-    @discardableResult
-    func removeDirectory(for shelfID: UUID) -> Bool {
-        let url = root.appendingPathComponent(shelfID.uuidString, isDirectory: true)
+    /// Deletes a file the app wrote, and the folder from `makeFolder()` it is in once that is empty.
+    /// Does nothing for a URL outside the directory.
+    func discard(_ url: URL) {
+        let base = root.resolvingSymlinksInPath().pathComponents
+        let path = url.resolvingSymlinksInPath().pathComponents
+        guard path.count > base.count, Array(path.prefix(base.count)) == base else { return }
         try? FileManager.default.removeItem(at: url)
-        return !FileManager.default.fileExists(atPath: url.path)
+        let folder = url.deletingLastPathComponent()
+        if path.count == base.count + 2, (try? FileManager.default.contentsOfDirectory(atPath: folder.path))?.isEmpty == true {
+            try? FileManager.default.removeItem(at: folder)
+        }
     }
 
     func removeAll() {

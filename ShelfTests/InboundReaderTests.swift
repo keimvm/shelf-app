@@ -27,7 +27,7 @@ final class InboundReaderTests {
 
     private func read() -> (accepted: Bool, items: [ShelfItem]) {
         let received = Received()
-        let accepted = InboundReader(directory: directory).read(pasteboard) { received.items += $0 }
+        let accepted = InboundReader(storage: TemporaryStorage(root: directory)).read(pasteboard) { received.items += $0 }
         return (accepted, received.items)
     }
 

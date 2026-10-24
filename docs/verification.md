@@ -178,7 +178,7 @@
 
 ## 4. Services による「新規シェルフに置く」の検証（2026-10-24）
 
-F13（選択中のファイルをショートカットで新規シェルフに置く）の前提を確かめた。一度は Services で実装したが、新規シェルフのショートカット（F12）と同じキーにできないため採用せず、§5 の方式にした。
+0.1 の F13（選択中のファイルをショートカットで新規シェルフに置く）の前提を確かめた。一度は Services で実装したが、新規シェルフのショートカット（F12）と同じキーにできないため採用せず、§5 の方式にした。0.2 では、権限を最小にする原則を優先して Services に戻した（§6、PRD §9）。
 
 ### 4.1 方法
 
@@ -219,7 +219,7 @@ F13（選択中のファイルをショートカットで新規シェルフに�
 
 ## 5. Apple Events による Finder の選択項目の取得（2026-10-24）
 
-F13 を新規シェルフのショートカット（F12）と同じキーで実現する方式を確かめた。ショートカットを押した時点で Finder に選択を問い合わせる。
+0.1 の F13 を新規シェルフのショートカット（F12）と同じキーで実現する方式を確かめた。ショートカットを押した時点で Finder に選択を問い合わせる。この方式は Apple Events の許可とディスク全体の読み取り例外を要するため、0.2 で廃止した（§6、PRD §9）。
 
 ### 5.1 方法
 
@@ -258,3 +258,49 @@ F13 を新規シェルフのショートカット（F12）と同じキーで実�
 - Finder に開かせる試行で、CoreServicesUIAgent のエラーダイアログが何度か出た可能性がある。
 - `/Applications/Shelf.app` を入れ替えた。メニューの「ショートカットで Finder の選択項目を置く」をオンにし、Finder のオートメーションはユーザーが許可した。
 - スパイクと検証用のビルドは LaunchServices から登録を外した。
+
+## 6. 1 つのサービスでファイル・テキスト・URL を受け取る（2026-10-24）
+
+0.2 の F13（サービス「Shelf に置く」）の前提を確かめた。§4 で確かめたのはファイルだけを受け取るサービスだった。ここでは 1 つのサービスにファイル（`NSSendFileTypes`）とテキスト・URL（`NSSendTypes`）の両方を宣言して受け取れるかを見た。
+
+### 6.1 方法
+
+- コード：[spikes/capture](../spikes/capture/README.md)。使い捨て。
+  - `CaptureSpike`：Sandbox 有効（Entitlements は N2 の 3 つ）、`LSUIElement`。1 つのサービス（`NSSendFileTypes` = `public.item`、`NSSendTypes` = `public.url`・`public.utf8-plain-text`、`NSKeyEquivalent` = `^~@p`）を提供し、受け取った型・ファイルの読み取り可否・bookmark の作成可否・`frontmostApplication` をログに出す。
+  - `Driver`：`NSPerformService` でサービスを呼ぶ。合成のキー入力・マウス操作は使わない（ユーザーの操作と干渉しないため）。
+- 製品の確認は、Bundle ID を `dev.keimvm.Shelf.verify` に替えた Release ビルドで行った。インストール済みの Shelf 0.1 が起動していたため、同じコンテナ（一時ファイル・設定）を共有しないようにした。
+- 環境：macOS 27.0.1（26A434）、Xcode 27.1。
+
+### 6.2 結果
+
+**事実**
+- 宣言は `pbs -dump` にそのまま登録された（`NSSendFileTypes` と `NSSendTypes` の両方、`NSKeyEquivalent` = `^~@p`）。
+- `Driver` が `NSApplication.shared` を初期化しないと、`NSPerformService` は `true` を返すが、受け取り側のペーストボードは空だった（Sandbox の有無に関係なく。対照として Sandbox なしで署名し直しても空）。初期化すると届いた。
+- 1 つのサービスで、ファイル URL（`public.file-url` など）、テキスト（`public.utf8-plain-text`）、URL（`public.url`）のいずれも受け取れた。
+- Sandbox 下で、起動時に読めなかったファイル（対照：`readable=false`）が、サービスで受け取った後は読めた。security-scoped bookmark も作れた（972 バイト）。
+- ハンドラの時点で `frontmostApplication` は提供側（`isActive` は 0.3 秒後に `true`）。§4 と同じく、サービスの実行でシステムが提供側をアクティブにする。
+- 製品（0.2、検証用 Bundle ID）で：
+  - ファイル 2 件、2 行のテキスト、URL をサービスで渡すと、ログに `Put 2 item(s): file,file`、`Put 1 item(s): text`、`Put 1 item(s): webURL` が出た。一時ディレクトリに `会議メモ.txt` と `example.com.webloc` ができた。
+  - 隠れていたシェルフが表示された（`CGWindowList` でレイヤー 3、260×200pt）。
+  - サービスの実行前後で `frontmostApplication` は呼び出し元（Claude のデスクトップアプリ）のままだった。ログは `reactivated the previous app=true`。
+  - `NSRunningApplication.terminate()` で終了すると、一時ディレクトリ（`tmp/Shelves`）は消えた。
+  - 渡したファイルの原本は、inode・更新日時・SHA-1 とも変わらなかった。
+  - コード署名の Entitlements は N2 の 3 つだけだった。バイナリは x86_64 と arm64。
+- 単体テスト（72 件）の実行中、統合ログに `AppDelegate` の `Launched` は出なかった（テストのホストでは組み立てない。N8）。
+
+**推測**
+- `NSPerformService` での結果は、サービスメニューやショートカットからの実行でも同じになる。§4 で、ショートカットからのファイルの受け取りとフォーカスの返却は確かめている。
+- 選択の型によってシステムがペーストボードの中身を決めるので、Finder ではファイル、テキストエディタではテキストが届く。
+
+**未確認（残り）**
+- 実際のキー入力（⌃⌥⌘P）とサービスメニューからの実行。Finder 以外のアプリでの選択（テキスト・リンク）。
+- メニューバーのアイコンの件数表示。`CGWindowList` にステータス項目のウィンドウが出ず、外から確かめられなかった。
+- 項目の右クリックメニュー（他のアプリが前面のときに出るか）と「Finder に表示」。
+- ドラッグを伴う操作の 0.2 での再確認（シェイクでの表示と呼び寄せ、取り出し、空になったら隠す）。PRD §10 の手順で確かめる。
+
+### 6.3 検証環境への影響
+
+- テストファイルは `spikes/capture/work/` に作成し、検証後に削除した。
+- `CaptureSpike.app`、検証用の `Shelf.app`（`dev.keimvm.Shelf.verify`）、テストのホストとして登録された Debug の `Shelf.app` を LaunchServices から登録を外し、`pbs -update` した。Debug のサービスが残っていると、`NSPerformService` が Debug 版（インストール済みの Shelf と同じコンテナ）を起動するおそれがあったため、呼ぶ前に外した。
+- `~/Library/Containers/dev.keimvm.Shelf.verify` は中身を消したが、macOS が保護するメタデータ（`.com.apple.containermanagerd.metadata.plist`）とそのフォルダは消せずに残っている。
+- インストール済みの Shelf 0.1 は起動したまま触れていない（終了・入れ替えはしていない）。

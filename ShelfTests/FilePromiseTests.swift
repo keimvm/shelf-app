@@ -35,15 +35,30 @@ private final class DeferredPromiseReceiver: NSFilePromiseReceiver {
     }
 }
 
+/// The shelf hides once it is emptied, but not while promised files are still arriving (F7).
 @MainActor
-struct FilePromiseTests {
-    private let directory = FileManager.default.temporaryDirectory
-        .appendingPathComponent("ShelfTests-\(UUID().uuidString)", isDirectory: true)
+final class FilePromiseTests {
+    private let storage = TemporaryStorage(
+        root: FileManager.default.temporaryDirectory.appendingPathComponent("ShelfTests-\(UUID().uuidString)", isDirectory: true)
+    )
+    private let controller: ShelfController
+    private var reader: InboundReader { controller.reader }
+    private var shelf: Shelf { controller.shelf }
+
+    init() {
+        controller = ShelfController(storage: storage)
+        let frame = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        controller.show(near: CGPoint(x: frame.midX, y: frame.midY))
+    }
+
+    isolated deinit {
+        controller.hide()
+        storage.removeAll()
+    }
 
     /// Waits for the delivery's main-actor state update, without timers or scheduling assumptions.
-    private func deliver(
-        _ receiver: DeferredPromiseReceiver, to reader: InboundReader, error: (any Error)? = nil
-    ) async {
+    private func deliver(_ receiver: DeferredPromiseReceiver, error: (any Error)? = nil) async {
+        let reader = reader
         let previous = reader.onPendingFilesChanged
         await withCheckedContinuation { continuation in
             reader.onPendingFilesChanged = {
@@ -55,101 +70,83 @@ struct FilePromiseTests {
         }
     }
 
-    private func takeAll(from shelf: Shelf, controller: ShelfViewController) {
-        let source = ShelfDragSource(urls: shelf.items.map(\.url)) { _, _ in }
-        controller.dragOutEnded(source, operation: .copy)
+    private func takeAll() {
+        controller.remove(shelf.items.map(\.url), keepingFilesFor: 0)
     }
 
-    @Test func lastItemDoesNotCloseShelfWhileAFileIsStillArriving() async {
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let shelf = Shelf()
-        shelf.append([.generated(directory.appendingPathComponent("existing.txt"), .text)])
-        let reader = InboundReader(directory: directory)
-        let controller = ShelfViewController(shelf: shelf, reader: reader)
-        var closes = 0
-        controller.onEmptied = { closes += 1 }
+    private func receive(_ receiver: DeferredPromiseReceiver) {
+        let shelf = shelf
+        reader.receivePromises([receiver]) { shelf.append($0) }
+    }
+
+    @Test func lastItemDoesNotHideShelfWhileAFileIsStillArriving() async {
+        shelf.append([.generated(storage.root.appendingPathComponent("existing.txt"), .text)])
         let receiver = DeferredPromiseReceiver(names: ["promised.txt"])
 
-        #expect(reader.receivePromises([receiver]) { shelf.append($0) })
+        let shelf = shelf
+        let accepted = reader.receivePromises([receiver]) { shelf.append($0) }
+        #expect(accepted)
         #expect(reader.pendingFileCount == 1)
-        takeAll(from: shelf, controller: controller)
+        takeAll()
         #expect(shelf.items.isEmpty)
-        #expect(closes == 0)
+        #expect(controller.isVisible)
 
-        await deliver(receiver, to: reader)
+        await deliver(receiver)
         #expect(reader.pendingFileCount == 0)
         #expect(shelf.items.map(\.name) == ["promised.txt"])
-        #expect(closes == 0)
+        #expect(controller.isVisible)
 
-        takeAll(from: shelf, controller: controller)
-        #expect(closes == 1)
+        takeAll()
+        #expect(!controller.isVisible)
     }
 
     @Test func waitsForEveryFileAcrossOverlappingDrops() async {
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let shelf = Shelf()
-        let reader = InboundReader(directory: directory)
-        let controller = ShelfViewController(shelf: shelf, reader: reader)
-        var closes = 0
-        controller.onEmptied = { closes += 1 }
         let first = DeferredPromiseReceiver(names: ["first.txt", "second.txt"])
         let second = DeferredPromiseReceiver(names: ["third.txt"])
-        reader.receivePromises([first]) { shelf.append($0) }
-        reader.receivePromises([second]) { shelf.append($0) }
+        receive(first)
+        receive(second)
         #expect(reader.pendingFileCount == 3)
 
-        await deliver(first, to: reader)
-        takeAll(from: shelf, controller: controller)
+        await deliver(first)
+        takeAll()
         #expect(reader.pendingFileCount == 2)
-        #expect(closes == 0)
+        #expect(controller.isVisible)
 
-        await deliver(second, to: reader)
-        takeAll(from: shelf, controller: controller)
+        await deliver(second)
+        takeAll()
         #expect(reader.pendingFileCount == 1)
-        #expect(closes == 0)
+        #expect(controller.isVisible)
 
-        await deliver(first, to: reader)
+        await deliver(first)
         #expect(reader.pendingFileCount == 0)
         #expect(shelf.items.map(\.name) == ["second.txt"])
-        #expect(closes == 0)
-        takeAll(from: shelf, controller: controller)
-        #expect(closes == 1)
+        #expect(controller.isVisible)
+        takeAll()
+        #expect(!controller.isVisible)
     }
 
-    @Test func deferredCloseFinishesWhenEveryPendingFileFails() async {
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let shelf = Shelf()
-        shelf.append([.generated(directory.appendingPathComponent("existing.txt"), .text)])
-        let reader = InboundReader(directory: directory)
-        let controller = ShelfViewController(shelf: shelf, reader: reader)
-        var closes = 0
-        controller.onEmptied = { closes += 1 }
+    @Test func deferredHideFinishesWhenEveryPendingFileFails() async {
+        shelf.append([.generated(storage.root.appendingPathComponent("existing.txt"), .text)])
         let receiver = DeferredPromiseReceiver(names: ["first.txt", "second.txt"])
-        reader.receivePromises([receiver]) { shelf.append($0) }
-        takeAll(from: shelf, controller: controller)
+        receive(receiver)
+        takeAll()
         let error = NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError)
 
-        await deliver(receiver, to: reader, error: error)
+        await deliver(receiver, error: error)
         #expect(reader.pendingFileCount == 1)
-        #expect(closes == 0)
-        await deliver(receiver, to: reader, error: error)
+        #expect(controller.isVisible)
+        await deliver(receiver, error: error)
         #expect(reader.pendingFileCount == 0)
         #expect(shelf.items.isEmpty)
-        #expect(closes == 1)
+        #expect(!controller.isVisible)
     }
 
-    @Test func failedReceptionDoesNotCloseAnUnusedEmptyShelf() async {
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let shelf = Shelf()
-        let reader = InboundReader(directory: directory)
-        let controller = ShelfViewController(shelf: shelf, reader: reader)
-        var closes = 0
-        controller.onEmptied = { closes += 1 }
+    @Test func failedReceptionDoesNotHideAnUnusedEmptyShelf() async {
         let receiver = DeferredPromiseReceiver(names: ["failed.txt"])
-        reader.receivePromises([receiver]) { shelf.append($0) }
+        receive(receiver)
 
-        await deliver(receiver, to: reader, error: NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError))
+        await deliver(receiver, error: NSError(domain: NSCocoaErrorDomain, code: NSUserCancelledError))
         #expect(reader.pendingFileCount == 0)
-        #expect(closes == 0)
+        #expect(controller.isVisible)
     }
 }

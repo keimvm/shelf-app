@@ -1,15 +1,18 @@
 import AppKit
 import os
 
-/// Content of a shelf panel: a handle bar with a close button and a drag-all control above the item
-/// grid. The whole panel accepts drops (F5); items are dragged out one at a time or all at once (F6).
+/// Content of the shelf panel: a handle bar with a hide button and a drag-all control above the item
+/// grid. The whole panel accepts drops (F5); items are dragged out one at a time or all at once (F6),
+/// and each has a menu to show it in Finder or take it off (F14).
 final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
     static let handleHeight: CGFloat = 28
 
-    /// Called when the close button is clicked.
-    var onClose: (() -> Void)?
-    /// Called when the last item was dragged out (F7).
-    var onEmptied: (() -> Void)?
+    /// Called when the hide button is clicked.
+    var onHide: (() -> Void)?
+    /// Called with the URLs a destination took in a drag out (F6).
+    var onTakeOut: (([URL]) -> Void)?
+    /// Called with the URLs the user took off through a menu (F14).
+    var onRemove: (([URL]) -> Void)?
 
     private let shelf: Shelf
     private let reader: InboundReader
@@ -20,16 +23,11 @@ final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
     private let dragAllCount = NSTextField(labelWithString: "")
     /// The drag in progress, kept alive until it ends.
     private var dragSource: ShelfDragSource?
-    private var closeWhenReceivingFinishes = false
 
     init(shelf: Shelf, reader: InboundReader) {
         self.shelf = shelf
         self.reader = reader
         super.init(nibName: nil, bundle: nil)
-        reader.onPendingFilesChanged = { [weak self] in
-            guard let self, closeWhenReceivingFinishes else { return }
-            closeIfEmpty()
-        }
     }
 
     required init?(coder: NSCoder) {
@@ -67,13 +65,15 @@ final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
         scrollView.autohidesScrollers = true
 
         let handle = ShelfHandleView()
-        let closeButton = FirstMouseButton(
-            image: NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "閉じる")!,
+        // Hiding keeps the items, so the button does not look like closing for good.
+        let hideButton = FirstMouseButton(
+            image: NSImage(systemSymbolName: "minus.circle.fill", accessibilityDescription: "隠す")!,
             target: self,
-            action: #selector(close(_:))
+            action: #selector(hide(_:))
         )
-        closeButton.isBordered = false
-        closeButton.contentTintColor = .secondaryLabelColor
+        hideButton.isBordered = false
+        hideButton.contentTintColor = .secondaryLabelColor
+        hideButton.toolTip = "隠す（項目は残ります）"
 
         hint.textColor = .secondaryLabelColor
         hint.alignment = .center
@@ -98,7 +98,7 @@ final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
             dragAll.addSubview(subview)
         }
 
-        for subview in [dropView, handle, closeButton, dragAll] {
+        for subview in [dropView, handle, hideButton, dragAll] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             background.addSubview(subview)
         }
@@ -117,8 +117,8 @@ final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
             handle.trailingAnchor.constraint(equalTo: background.trailingAnchor),
             handle.heightAnchor.constraint(equalToConstant: Self.handleHeight),
 
-            closeButton.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 8),
-            closeButton.centerYAnchor.constraint(equalTo: handle.centerYAnchor),
+            hideButton.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 8),
+            hideButton.centerYAnchor.constraint(equalTo: handle.centerYAnchor),
 
             dragAll.trailingAnchor.constraint(equalTo: background.trailingAnchor, constant: -6),
             dragAll.topAnchor.constraint(equalTo: handle.topAnchor, constant: 4),
@@ -141,7 +141,6 @@ final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
         // Originals may have moved since the last look; check when the pointer comes over the shelf (F10).
         background.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
 
-        shelf.onChange = { [weak self] in self?.reload() }
         reload()
     }
 
@@ -149,7 +148,8 @@ final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
         shelf.refreshFiles()
     }
 
-    private func reload() {
+    /// Shows the shelf's current items.
+    func reload() {
         hint.isHidden = !shelf.items.isEmpty
         let available = shelf.items.filter(\.isAvailable).count
         dragAll.isHidden = available == 0
@@ -185,29 +185,34 @@ final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
     }
 
     /// Takes the dragged items off the shelf when the destination accepted them (F6, F7).
-    func dragOutEnded(_ source: ShelfDragSource, operation: NSDragOperation) {
+    private func dragOutEnded(_ source: ShelfDragSource, operation: NSDragOperation) {
         dragSource = nil
         log.info("Drag out ended with operation \(operation.rawValue)")
         guard !operation.isEmpty else { return }
-        shelf.remove(source.urls)
-        closeIfEmpty()
+        onTakeOut?(source.urls)
     }
 
-    private func closeIfEmpty() {
-        guard shelf.items.isEmpty else {
-            closeWhenReceivingFinishes = false
-            return
+    /// The menu of one item (F14). A missing original cannot be shown in Finder.
+    private func menu(for itemView: ShelfItemView) -> NSMenu? {
+        guard let index = collectionView.indexPath(for: itemView)?.item, shelf.items.indices.contains(index) else { return nil }
+        let item = shelf.items[index]
+        let menu = NSMenu()
+        let reveal = ActionMenuItem(title: "Finder に表示") {
+            NSWorkspace.shared.activateFileViewerSelecting([item.url])
         }
-        closeWhenReceivingFinishes = reader.pendingFileCount > 0
-        if !closeWhenReceivingFinishes { onEmptied?() }
+        reveal.isEnabled = item.isAvailable
+        menu.autoenablesItems = false
+        menu.addItem(reveal)
+        menu.addItem(ActionMenuItem(title: "シェルフから外す") { [weak self] in self?.onRemove?([item.url]) })
+        return menu
     }
 
     private static func iconFrame(centeredAt center: NSPoint) -> NSRect {
         NSRect(x: center.x - 24, y: center.y - 24, width: 48, height: 48)
     }
 
-    @objc private func close(_ sender: NSButton) {
-        onClose?()
+    @objc private func hide(_ sender: NSButton) {
+        onHide?()
     }
 
     // MARK: NSCollectionViewDataSource
@@ -221,6 +226,7 @@ final class ShelfViewController: NSViewController, NSCollectionViewDataSource {
         if let itemView = view as? ShelfItemView {
             itemView.item = shelf.items[indexPath.item]
             itemView.onDragOut = { [weak self] itemView, event in self?.dragOut(from: itemView, event: event) }
+            itemView.onMenu = { [weak self] itemView in self?.menu(for: itemView) }
         }
         return view
     }
@@ -244,4 +250,23 @@ private final class ShelfHandleView: NSView {
 /// The panel is usually not key while another app is active; take the first click anyway (verification.md K2).
 private final class FirstMouseButton: NSButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// A menu item that runs a closure.
+private final class ActionMenuItem: NSMenuItem {
+    private let handler: () -> Void
+
+    init(title: String, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(run(_:)), keyEquivalent: "")
+        target = self
+    }
+
+    required init(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+
+    @objc private func run(_ sender: NSMenuItem) {
+        handler()
+    }
 }

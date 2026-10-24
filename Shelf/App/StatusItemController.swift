@@ -1,43 +1,56 @@
 import AppKit
 import ServiceManagement
 
-/// Menu bar item (F1): new shelf and its shortcut, shake toggle, sensitivity, open at login, quit.
+/// Menu bar item (F1). Its icon shows whether the shelf holds anything and how many items, so hidden
+/// items are not forgotten. The menu shows or hides the shelf, empties it, and holds the settings.
 @MainActor
 final class StatusItemController: NSObject, NSMenuDelegate {
-    /// Called by "新規シェルフ". The menu item stays disabled while this is nil.
-    var onNewShelf: (() -> Void)?
+    /// Called with the new value when shaking is turned on or off.
+    var onShakeChanged: ((Bool) -> Void)?
 
     private let preferences: Preferences
-    private let newShelfHotKey: GlobalHotKey
-    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    private let newShelfItem = NSMenuItem(title: "新規シェルフ", action: #selector(newShelf(_:)), keyEquivalent: "")
-    private let finderSelectionItem = NSMenuItem(
-        title: "ショートカットで Finder の選択項目を置く", action: #selector(toggleFinderSelection(_:)), keyEquivalent: "")
+    private let shelfHotKey: GlobalHotKey
+    private let shelf: ShelfController
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let toggleItem = NSMenuItem(title: "", action: #selector(toggleShelf(_:)), keyEquivalent: "")
+    private let clearItem = NSMenuItem(title: "シェルフを空にする", action: #selector(clearShelf(_:)), keyEquivalent: "")
     private let shakeItem = NSMenuItem(title: "シェイクで開く", action: #selector(toggleShake(_:)), keyEquivalent: "")
     private var sensitivityItems: [NSMenuItem] = []
     private let loginItem = NSMenuItem(title: "ログイン時に開く", action: #selector(toggleOpenAtLogin(_:)), keyEquivalent: "")
     private var shortcutRecorder: HotKeyRecorder?
 
-    init(preferences: Preferences, newShelfHotKey: GlobalHotKey) {
+    init(preferences: Preferences, shelfHotKey: GlobalHotKey, shelf: ShelfController) {
         self.preferences = preferences
-        self.newShelfHotKey = newShelfHotKey
+        self.shelfHotKey = shelfHotKey
+        self.shelf = shelf
         super.init()
 
-        statusItem.button?.image = NSImage(systemSymbolName: "tray", accessibilityDescription: "Shelf")
+        statusItem.button?.imagePosition = .imageLeading
         statusItem.menu = makeMenu()
+        update()
+    }
+
+    /// Shows the number of items on the shelf. Call after it changes.
+    func update() {
+        let count = shelf.shelf.items.count
+        statusItem.button?.image = NSImage(
+            systemSymbolName: count == 0 ? "tray" : "tray.full",
+            accessibilityDescription: count == 0 ? "Shelf" : "Shelf（\(count) 項目）"
+        )
+        statusItem.button?.title = count == 0 ? "" : "\(count)"
     }
 
     private func makeMenu() -> NSMenu {
         let menu = NSMenu()
         menu.delegate = self
 
-        newShelfItem.target = self
-        menu.addItem(newShelfItem)
-        let shortcutItem = NSMenuItem(title: "新規シェルフのショートカット…", action: #selector(changeNewShelfShortcut(_:)), keyEquivalent: "")
+        for item in [toggleItem, clearItem] {
+            item.target = self
+            menu.addItem(item)
+        }
+        let shortcutItem = NSMenuItem(title: "表示のショートカット…", action: #selector(changeShortcut(_:)), keyEquivalent: "")
         shortcutItem.target = self
         menu.addItem(shortcutItem)
-        finderSelectionItem.target = self
-        menu.addItem(finderSelectionItem)
         menu.addItem(.separator())
 
         shakeItem.target = self
@@ -65,11 +78,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        // Shown only; the global shortcut is what opens the shelf. Only a registered one is shown.
-        let hotKey = newShelfHotKey.hotKey
-        newShelfItem.keyEquivalent = hotKey?.keyEquivalent ?? ""
-        newShelfItem.keyEquivalentModifierMask = hotKey?.modifiers ?? []
-        finderSelectionItem.state = preferences.placesFinderSelection ? .on : .off
+        toggleItem.title = shelf.isVisible ? "シェルフを隠す" : "シェルフを表示"
+        // Shown only; the global shortcut is what toggles the shelf. Only a registered one is shown.
+        let hotKey = shelfHotKey.hotKey
+        toggleItem.keyEquivalent = hotKey?.keyEquivalent ?? ""
+        toggleItem.keyEquivalentModifierMask = hotKey?.modifiers ?? []
         shakeItem.state = preferences.isShakeEnabled ? .on : .off
         let current = preferences.shakeSensitivity.rawValue
         for item in sensitivityItems {
@@ -83,48 +96,38 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
-    @objc private func newShelf(_ sender: NSMenuItem) {
-        onNewShelf?()
+    @objc private func toggleShelf(_ sender: NSMenuItem) {
+        shelf.toggle(near: NSEvent.mouseLocation)
     }
 
-    @objc private func changeNewShelfShortcut(_ sender: NSMenuItem) {
+    @objc private func clearShelf(_ sender: NSMenuItem) {
+        shelf.clear()
+    }
+
+    @objc private func changeShortcut(_ sender: NSMenuItem) {
         if let shortcutRecorder {
             shortcutRecorder.show()
             return
         }
         // Released while recording so that pressing the current combination reaches the recorder.
-        newShelfHotKey.register(nil)
-        let recorder = HotKeyRecorder(title: "新規シェルフのショートカット", hotKey: preferences.newShelfHotKey)
+        shelfHotKey.register(nil)
+        let recorder = HotKeyRecorder(title: "シェルフを表示するショートカット", hotKey: preferences.shelfHotKey)
         recorder.onCommit = { [unowned self] hotKey in
-            guard newShelfHotKey.register(hotKey) else { return false }
-            preferences.newShelfHotKey = hotKey
+            guard shelfHotKey.register(hotKey) else { return false }
+            preferences.shelfHotKey = hotKey
             return true
         }
         recorder.onClose = { [unowned self] in
-            newShelfHotKey.register(preferences.newShelfHotKey)
+            shelfHotKey.register(preferences.shelfHotKey)
             shortcutRecorder = nil
         }
         shortcutRecorder = recorder
         recorder.show()
     }
 
-    /// Turning it on asks for permission to automate Finder first (F13). When the user has denied it,
-    /// only System Settings can allow it, so that is opened and the setting stays off.
-    @objc private func toggleFinderSelection(_ sender: NSMenuItem) {
-        guard !preferences.placesFinderSelection else {
-            preferences.placesFinderSelection = false
-            return
-        }
-        FinderSelection.requestPermission { [preferences] granted in
-            preferences.placesFinderSelection = granted
-            if !granted, let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
-                NSWorkspace.shared.open(url)
-            }
-        }
-    }
-
     @objc private func toggleShake(_ sender: NSMenuItem) {
         preferences.isShakeEnabled.toggle()
+        onShakeChanged?(preferences.isShakeEnabled)
     }
 
     @objc private func selectSensitivity(_ sender: NSMenuItem) {
@@ -155,8 +158,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
 extension StatusItemController: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        if menuItem.action == #selector(newShelf(_:)) {
-            return onNewShelf != nil
+        if menuItem.action == #selector(clearShelf(_:)) {
+            return !shelf.shelf.items.isEmpty
         }
         return true
     }

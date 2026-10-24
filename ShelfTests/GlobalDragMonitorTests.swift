@@ -66,13 +66,6 @@ struct GlobalDragMonitorTests {
         #expect(shakes().isEmpty)
     }
 
-    @Test func disabledShakeIsIgnored() {
-        preferences.isShakeEnabled = false
-        let (monitor, shakes) = makeMonitor()
-        press(monitor)
-        #expect(shakes().isEmpty)
-    }
-
     @Test func eachDragCanFireAgain() {
         let (monitor, shakes) = makeMonitor()
         press(monitor)

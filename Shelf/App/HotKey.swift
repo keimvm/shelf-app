@@ -3,7 +3,7 @@ import Carbon.HIToolbox
 
 /// A key combination for a global shortcut: a virtual key code and modifier keys.
 struct HotKey: Equatable, Sendable {
-    static let newShelfDefault = HotKey(keyCode: UInt16(kVK_ANSI_N), modifiers: [.control, .option, .command])
+    static let shelfDefault = HotKey(keyCode: UInt16(kVK_ANSI_N), modifiers: [.control, .option, .command])
 
     let keyCode: UInt16
     let modifiers: NSEvent.ModifierFlags

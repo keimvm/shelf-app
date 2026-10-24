@@ -1,14 +1,13 @@
 import Foundation
 
-/// The items of one shelf.
+/// The items on the shelf, in the order they were put there.
 final class Shelf {
-    let id = UUID()
     private(set) var items: [ShelfItem] = []
 
     /// Called after `items` changes.
     var onChange: (() -> Void)?
 
-    /// Security-scoped URLs resolved from bookmarks whose access is held until `releaseAccess()`.
+    /// Security-scoped URLs resolved from bookmarks whose access is held while their item is on the shelf.
     private var accessedURLs: Set<URL> = []
 
     /// Adds items in order. A file that is already on the shelf is not added twice.
@@ -24,12 +23,20 @@ final class Shelf {
         if added { onChange?() }
     }
 
-    /// Removes the items at `urls`, as after they were dragged out (F6).
-    func remove(_ urls: [URL]) {
-        let removed = Set(urls.map(\.standardizedFileURL))
-        let count = items.count
-        items.removeAll { removed.contains($0.url.standardizedFileURL) }
-        if items.count != count { onChange?() }
+    /// Takes the items at `urls` off the shelf (F6, F14) and returns them.
+    @discardableResult
+    func remove(_ urls: [URL]) -> [ShelfItem] {
+        let removing = Set(urls.map(\.standardizedFileURL))
+        let removed = items.filter { removing.contains($0.url.standardizedFileURL) }
+        guard !removed.isEmpty else { return [] }
+        items.removeAll { removing.contains($0.url.standardizedFileURL) }
+        for url in removed.map(\.url) where accessedURLs.remove(url) != nil {
+            url.stopAccessingSecurityScopedResource()
+        }
+        // Also lets go of the places files were at before they moved.
+        if items.isEmpty { releaseAccess() }
+        onChange?()
+        return removed
     }
 
     /// Follows moved or renamed originals and marks deleted ones missing (F10).
@@ -47,7 +54,7 @@ final class Shelf {
         onChange?()
     }
 
-    /// Gives up the security-scoped access taken by `refreshFiles()`. Call when the shelf closes.
+    /// Gives up all security-scoped access taken by `refreshFiles()`.
     func releaseAccess() {
         accessedURLs.forEach { $0.stopAccessingSecurityScopedResource() }
         accessedURLs.removeAll()

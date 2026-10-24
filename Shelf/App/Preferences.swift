@@ -5,8 +5,10 @@ final class Preferences {
     private enum Key {
         static let shakeEnabled = "shakeEnabled"
         static let shakeSensitivity = "shakeSensitivity"
-        static let newShelfHotKey = "newShelfHotKey"
-        static let placesFinderSelection = "placesFinderSelection"
+        /// Still the 0.1 name, so a shortcut chosen then carries over.
+        static let shelfHotKey = "newShelfHotKey"
+        /// Settings of earlier versions that no longer exist; removed so that nothing is left behind.
+        static let retired = ["placesFinderSelection"]
     }
 
     private let defaults: UserDefaults
@@ -16,16 +18,9 @@ final class Preferences {
         defaults.register(defaults: [
             Key.shakeEnabled: true,
             Key.shakeSensitivity: ShakeSensitivity.standard.rawValue,
-            Key.newShelfHotKey: Self.dictionary(for: .newShelfDefault),
-            Key.placesFinderSelection: false,
+            Key.shelfHotKey: Self.dictionary(for: .shelfDefault),
         ])
-    }
-
-    /// Whether the new-shelf shortcut puts the files selected in Finder on the shelf (F13). Off by
-    /// default because it needs permission to automate Finder.
-    var placesFinderSelection: Bool {
-        get { defaults.bool(forKey: Key.placesFinderSelection) }
-        set { defaults.set(newValue, forKey: Key.placesFinderSelection) }
+        Key.retired.forEach(defaults.removeObject(forKey:))
     }
 
     var isShakeEnabled: Bool {
@@ -38,17 +33,17 @@ final class Preferences {
         set { defaults.set(newValue.rawValue, forKey: Key.shakeSensitivity) }
     }
 
-    /// The global shortcut for a new shelf. Stored as an empty dictionary when the user chose none, so that
-    /// the registered default does not come back.
-    var newShelfHotKey: HotKey? {
+    /// The global shortcut that shows and hides the shelf (F12). Stored as an empty dictionary when the user
+    /// chose none, so that the registered default does not come back.
+    var shelfHotKey: HotKey? {
         get {
-            guard let dictionary = defaults.dictionary(forKey: Key.newShelfHotKey),
+            guard let dictionary = defaults.dictionary(forKey: Key.shelfHotKey),
                   let keyCode = dictionary["keyCode"] as? Int,
                   let modifiers = dictionary["modifiers"] as? Int
             else { return nil }
             return HotKey(keyCode: UInt16(keyCode), modifiers: NSEvent.ModifierFlags(rawValue: UInt(modifiers)))
         }
-        set { defaults.set(newValue.map(Self.dictionary(for:)) ?? [:], forKey: Key.newShelfHotKey) }
+        set { defaults.set(newValue.map(Self.dictionary(for:)) ?? [:], forKey: Key.shelfHotKey) }
     }
 
     private static func dictionary(for hotKey: HotKey) -> [String: Int] {

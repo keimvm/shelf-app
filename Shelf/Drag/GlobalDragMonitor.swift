@@ -5,7 +5,8 @@ import os
 ///
 /// A press counts as an external drag once the drag pasteboard's `changeCount` differs from its
 /// value at mouse-down. Presses that begin in this app (our own drags) are ignored. The pasteboard
-/// contents are never read here.
+/// contents are never read here. The mouse is watched only between `start()` and `stop()`, which the
+/// app ties to the shake setting (N4).
 @MainActor
 final class GlobalDragMonitor {
     enum Phase {
@@ -21,7 +22,6 @@ final class GlobalDragMonitor {
     private struct Press {
         var changeCountAtDown: Int
         var beganInThisApp: Bool
-        var shakeEnabled: Bool
         var isExternalDrag = false
     }
 
@@ -99,15 +99,14 @@ final class GlobalDragMonitor {
     private func begin(inThisApp: Bool) {
         press = Press(
             changeCountAtDown: dragChangeCount(),
-            beganInThisApp: inThisApp,
-            shakeEnabled: preferences.isShakeEnabled
+            beganInThisApp: inThisApp
         )
         detector.reset()
         detector.sensitivity = preferences.shakeSensitivity
     }
 
     private func drag(to point: CGPoint, time: TimeInterval) {
-        guard var press, !press.beganInThisApp, press.shakeEnabled else { return }
+        guard var press, !press.beganInThisApp else { return }
         if !press.isExternalDrag {
             guard dragChangeCount() != press.changeCountAtDown else { return }
             press.isExternalDrag = true

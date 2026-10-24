@@ -30,6 +30,8 @@ final class ShelfDragSource: NSObject, NSDraggingSource {
 final class ShelfDragOriginView: NSView {
     /// Called once per press when the mouse has moved far enough to start a drag.
     var onDragOut: ((NSEvent) -> Void)?
+    /// Makes the menu for a secondary click.
+    var onMenu: (() -> NSMenu?)?
 
     private var pressLocation: NSPoint?
 
@@ -53,5 +55,9 @@ final class ShelfDragOriginView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         pressLocation = nil
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        onMenu?() ?? super.menu(for: event)
     }
 }

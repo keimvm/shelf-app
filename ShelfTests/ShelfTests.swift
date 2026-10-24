@@ -38,9 +38,10 @@ struct ShelfModelTests {
         var changes = 0
         shelf.onChange = { changes += 1 }
 
-        shelf.remove([URL(fileURLWithPath: "/tmp/./one"), URL(fileURLWithPath: "/tmp/x/a.txt")])
+        let removed = shelf.remove([URL(fileURLWithPath: "/tmp/./one"), URL(fileURLWithPath: "/tmp/x/a.txt")])
+        #expect(removed.map(\.name) == ["one", "a.txt"])
         #expect(shelf.items.map(\.name) == ["two"])
-        shelf.remove([URL(fileURLWithPath: "/tmp/elsewhere")])
+        #expect(shelf.remove([URL(fileURLWithPath: "/tmp/elsewhere")]).isEmpty)
         #expect(changes == 1)
     }
 

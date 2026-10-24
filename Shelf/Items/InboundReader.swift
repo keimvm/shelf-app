@@ -1,11 +1,11 @@
 import AppKit
 import os
 
-/// Turns a dropped pasteboard into shelf items (F5, F8).
+/// Turns a pasteboard from a drop or the service into shelf items (F5, F8, F13).
 ///
-/// One kind is taken per drop, in this order: file URLs, file promises, web URLs, text. Files are
-/// kept by reference; the other kinds become files in the shelf's temporary directory
-/// (promised files as delivered, text as `.txt`, web URLs as `.webloc`).
+/// One kind is taken at a time, in this order: file URLs, file promises, web URLs, text. Files are
+/// kept by reference; the other kinds become files in `storage` (promised files as delivered, text as
+/// `.txt`, web URLs as `.webloc`).
 @MainActor
 final class InboundReader {
     static let urlNameType = NSPasteboard.PasteboardType("public.url-name")
@@ -14,8 +14,7 @@ final class InboundReader {
     static let readableTypes: [NSPasteboard.PasteboardType] =
         [.fileURL, .URL, .string] + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }
 
-    /// The shelf's temporary directory.
-    let directory: URL
+    let storage: TemporaryStorage
 
     /// Includes files whose delivery failed until their callback has been handled on the main actor.
     private(set) var pendingFileCount = 0 {
@@ -23,8 +22,8 @@ final class InboundReader {
     }
     var onPendingFilesChanged: (() -> Void)?
 
-    init(directory: URL) {
-        self.directory = directory
+    init(storage: TemporaryStorage) {
+        self.storage = storage
     }
 
     private static let promiseQueue: OperationQueue = {
@@ -35,8 +34,8 @@ final class InboundReader {
     nonisolated private static let log = Logger(subsystem: "dev.keimvm.Shelf", category: "inbound")
 
     /// Reads `pasteboard` and reports the items through `completion` on the main actor.
-    /// Call this while handling the drop: promises are requested before returning. Files, URLs, and
-    /// text are reported once, before returning; each promised file is reported when it arrives.
+    /// Call this while handling the drop or service: promises are requested before returning. Files,
+    /// URLs, and text are reported once, before returning; each promised file is reported when it arrives.
     /// Returns `false` when the pasteboard has nothing this app accepts.
     func read(_ pasteboard: NSPasteboard, completion: @escaping @MainActor @Sendable ([ShelfItem]) -> Void) -> Bool {
         let fileURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
@@ -70,9 +69,9 @@ final class InboundReader {
     @discardableResult
     func receivePromises(_ receivers: [NSFilePromiseReceiver], completion: @escaping @MainActor @Sendable ([ShelfItem]) -> Void) -> Bool {
         // A fresh folder per drop, so promised files with the same name do not collide.
-        let destination = directory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let destination: URL
         do {
-            try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+            destination = try storage.makeFolder()
         } catch {
             Self.log.error("Could not create promise folder: \(error.localizedDescription, privacy: .public)")
             return false
@@ -99,8 +98,8 @@ final class InboundReader {
     }
 
     private func writeText(_ text: String) -> ShelfItem? {
-        let url = TemporaryStorage.uniqueURL(for: "\(Self.fileName(fromText: text)).txt", in: directory)
         do {
+            let url = TemporaryStorage.uniqueURL(for: "\(Self.fileName(fromText: text)).txt", in: try storage.directory())
             try Data(text.utf8).write(to: url, options: .atomic)
             return .generated(url, .text)
         } catch {
@@ -111,8 +110,8 @@ final class InboundReader {
 
     private func writeWebloc(_ webURL: URL, name: String?) -> ShelfItem? {
         let title = Self.sanitized(name ?? "") ?? Self.sanitized(webURL.host() ?? "") ?? "リンク"
-        let url = TemporaryStorage.uniqueURL(for: "\(title).webloc", in: directory)
         do {
+            let url = TemporaryStorage.uniqueURL(for: "\(title).webloc", in: try storage.directory())
             let data = try PropertyListSerialization.data(fromPropertyList: ["URL": webURL.absoluteString], format: .xml, options: 0)
             try data.write(to: url, options: .atomic)
             return .generated(url, .webURL)

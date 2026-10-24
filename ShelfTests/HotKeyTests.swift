@@ -11,12 +11,12 @@ struct HotKeyTests {
     }
 
     @Test func carbonModifiers() {
-        #expect(HotKey.newShelfDefault.carbonModifiers == UInt32(controlKey | optionKey | cmdKey))
+        #expect(HotKey.shelfDefault.carbonModifiers == UInt32(controlKey | optionKey | cmdKey))
         #expect(HotKey(keyCode: 0, modifiers: [.shift, .command, .capsLock]).carbonModifiers == UInt32(shiftKey | cmdKey))
     }
 
     @Test func eventNeedsControlOptionOrCommand() {
-        #expect(HotKey(event: keyDown(kVK_ANSI_N, [.control, .option, .command])) == .newShelfDefault)
+        #expect(HotKey(event: keyDown(kVK_ANSI_N, [.control, .option, .command])) == .shelfDefault)
         #expect(HotKey(event: keyDown(kVK_ANSI_N, [.option])) != nil)
         #expect(HotKey(event: keyDown(kVK_ANSI_N, [])) == nil)
         #expect(HotKey(event: keyDown(kVK_ANSI_N, [.shift])) == nil)
@@ -33,21 +33,26 @@ struct HotKeyTests {
 
     @Test func preferencesKeepDefaultChangeAndNone() {
         let defaults = UserDefaults(suiteName: "HotKeyTests-\(UUID().uuidString)")!
-        #expect(Preferences(defaults: defaults).newShelfHotKey == .newShelfDefault)
+        #expect(Preferences(defaults: defaults).shelfHotKey == .shelfDefault)
 
         let changed = HotKey(keyCode: UInt16(kVK_ANSI_S), modifiers: [.option, .shift])
-        Preferences(defaults: defaults).newShelfHotKey = changed
-        #expect(Preferences(defaults: defaults).newShelfHotKey == changed)
+        Preferences(defaults: defaults).shelfHotKey = changed
+        #expect(Preferences(defaults: defaults).shelfHotKey == changed)
 
-        Preferences(defaults: defaults).newShelfHotKey = nil
-        #expect(Preferences(defaults: defaults).newShelfHotKey == nil)
+        Preferences(defaults: defaults).shelfHotKey = nil
+        #expect(Preferences(defaults: defaults).shelfHotKey == nil)
     }
 
-    @Test func placingFinderSelectionIsOffUntilTurnedOn() {
+    @Test func shortcutChosenInVersion01CarriesOver() {
         let defaults = UserDefaults(suiteName: "HotKeyTests-\(UUID().uuidString)")!
-        #expect(!Preferences(defaults: defaults).placesFinderSelection)
+        defaults.set(["keyCode": kVK_F6, "modifiers": 0], forKey: "newShelfHotKey")
+        #expect(Preferences(defaults: defaults).shelfHotKey == HotKey(keyCode: UInt16(kVK_F6), modifiers: []))
+    }
 
-        Preferences(defaults: defaults).placesFinderSelection = true
-        #expect(Preferences(defaults: defaults).placesFinderSelection)
+    @Test func retiredSettingsAreRemoved() {
+        let defaults = UserDefaults(suiteName: "HotKeyTests-\(UUID().uuidString)")!
+        defaults.set(true, forKey: "placesFinderSelection")
+        _ = Preferences(defaults: defaults)
+        #expect(defaults.object(forKey: "placesFinderSelection") == nil)
     }
 }
